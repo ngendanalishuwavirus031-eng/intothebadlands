@@ -104,6 +104,17 @@
   }
   .field input:focus, .field select:focus, .field textarea:focus{ border-color: var(--rust); }
   .field textarea{ resize:vertical; min-height:60px; }
+  .file-picker{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .file-picker input[type="file"]{
+    position:absolute; width:1px; height:1px; opacity:0; overflow:hidden; pointer-events:none;
+  }
+  .file-picker-btn{
+    background: var(--bg); border:1px solid var(--rust); color: var(--rust-bright);
+    font-family:inherit; font-size:12px; letter-spacing:0.05em; text-transform:uppercase;
+    padding: 10px 14px; cursor:pointer; white-space:nowrap;
+  }
+  .file-picker-btn:hover{ background: var(--rust); color:#1a130d; }
+  .file-name{ font-size:12px; color: var(--sand-dim); word-break:break-all; }
   .form-actions{ display:flex; gap:10px; margin-top: 18px; }
   .btn-primary{
     flex:1; background: var(--rust); color:#1a130d; border:none;
@@ -418,12 +429,20 @@
     </div>
     <div class="field">
       <label>Media File (song or video, from your phone)</label>
-      <input type="file" id="fMediaFile" accept="audio/*,video/*">
+      <div class="file-picker">
+        <button type="button" class="file-picker-btn" id="fMediaBtn">Choose File</button>
+        <span class="file-name" id="fMediaName">No file chosen</span>
+        <input type="file" id="fMediaFile" accept="audio/*,video/*">
+      </div>
       <div id="mediaHint" style="font-size:11px; color:var(--sand-dim); margin-top:4px;"></div>
     </div>
     <div class="field">
       <label>Cover Image (optional for videos — auto-generated if skipped)</label>
-      <input type="file" id="fCoverFile" accept="image/*">
+      <div class="file-picker">
+        <button type="button" class="file-picker-btn" id="fCoverBtn">Choose File</button>
+        <span class="file-name" id="fCoverName">No file chosen</span>
+        <input type="file" id="fCoverFile" accept="image/*">
+      </div>
       <div id="coverHint" style="font-size:11px; color:var(--sand-dim); margin-top:4px;"></div>
     </div>
     <div class="field">
@@ -653,6 +672,8 @@ function openEditForm(id){
   document.getElementById("fTag").value = t.tag || "New";
   document.getElementById("fMediaFile").value = "";
   document.getElementById("fCoverFile").value = "";
+  document.getElementById("fMediaName").textContent = "No file chosen";
+  document.getElementById("fCoverName").textContent = "No file chosen";
   document.getElementById("mediaHint").textContent = "Leave blank to keep the current file: " + (t.title || "");
   document.getElementById("coverHint").textContent = "Leave blank to keep the current cover.";
   document.getElementById("uploadOverlay").classList.add("open");
@@ -667,6 +688,8 @@ function resetUploadForm(){
   document.getElementById("fType").value = "song";
   document.getElementById("fMediaFile").value = "";
   document.getElementById("fCoverFile").value = "";
+  document.getElementById("fMediaName").textContent = "No file chosen";
+  document.getElementById("fCoverName").textContent = "No file chosen";
   document.getElementById("fDesc").value = "";
   document.getElementById("fTag").value = "New";
   document.getElementById("mediaHint").textContent = "";
@@ -773,6 +796,21 @@ document.getElementById("cancelUpload").addEventListener("click", () => { upload
 /* ===== Cloudinary config ===== */
 const CLOUD_NAME = "dckdyj2jp";
 const UPLOAD_PRESET = "dxnzsm85";
+
+document.getElementById("fMediaBtn").addEventListener("click", () => {
+  document.getElementById("fMediaFile").click();
+});
+document.getElementById("fCoverBtn").addEventListener("click", () => {
+  document.getElementById("fCoverFile").click();
+});
+document.getElementById("fMediaFile").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  document.getElementById("fMediaName").textContent = f ? f.name : "No file chosen";
+});
+document.getElementById("fCoverFile").addEventListener("change", (e) => {
+  const f = e.target.files[0];
+  document.getElementById("fCoverName").textContent = f ? f.name : "No file chosen";
+});
 
 function uploadToCloudinary(file, resourceType, onProgress){
   return new Promise((resolve, reject) => {
