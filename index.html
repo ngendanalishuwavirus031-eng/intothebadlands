@@ -136,6 +136,13 @@
     display:flex; align-items:center; justify-content:center;
   }
   .delete-x:hover{ background: var(--rust); }
+  .edit-x{
+    position:absolute; top:10px; right:44px; z-index:3;
+    background: rgba(20,10,5,0.85); color:#fff; border:1px solid var(--rust);
+    width:26px; height:26px; border-radius:50%; cursor:pointer; font-size:12px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .edit-x:hover{ background: var(--rust); }
 
   .search-bar{
     display:flex; align-items:center; gap:8px;
@@ -410,12 +417,14 @@
       </select>
     </div>
     <div class="field">
-      <label>Media URL (Cloudinary file link)</label>
-      <input type="text" id="fSrc" placeholder="https://res.cloudinary.com/.../file.mp3">
+      <label>Media File (song or video, from your phone)</label>
+      <input type="file" id="fMediaFile" accept="audio/*,video/*">
+      <div id="mediaHint" style="font-size:11px; color:var(--sand-dim); margin-top:4px;"></div>
     </div>
     <div class="field">
-      <label>Cover Image URL</label>
-      <input type="text" id="fCover" placeholder="https://res.cloudinary.com/.../cover.jpg">
+      <label>Cover Image (optional for videos — auto-generated if skipped)</label>
+      <input type="file" id="fCoverFile" accept="image/*">
+      <div id="coverHint" style="font-size:11px; color:var(--sand-dim); margin-top:4px;"></div>
     </div>
     <div class="field">
       <label>Short Description</label>
@@ -424,6 +433,12 @@
     <div class="field">
       <label>Tag (for spotlight badge)</label>
       <input type="text" id="fTag" placeholder="e.g. New, Spotlight, Hits Only" value="New">
+    </div>
+    <div class="field" id="uploadProgressWrap" style="display:none;">
+      <label id="uploadProgressLabel">Uploading...</label>
+      <div style="background:var(--bg); border:1px solid var(--line); height:8px;">
+        <div id="uploadProgressBar" style="background:var(--rust); height:100%; width:0%; transition:width .2s;"></div>
+      </div>
     </div>
     <div class="form-actions">
       <button class="btn-secondary" id="cancelUpload">Cancel</button>
@@ -448,7 +463,7 @@ import {
   getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, collection, addDoc, deleteDoc, doc,
+  getFirestore, collection, addDoc, deleteDoc, doc, updateDoc,
   onSnapshot, query, orderBy, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 
@@ -468,6 +483,7 @@ const db = getFirestore(app);
 
 let TRACKS = [];
 let isOwner = false;
+let editingId = null;
 
 const PAGE_SIZE = 6;
 let currentFilter = "all";
@@ -510,7 +526,7 @@ function renderSpotlight(){
   }
   wrap.innerHTML = top3.map((t, i) => `
     <div class="spot-card ${i===0 ? 'main':''}" data-id="${t.id}">
-      ${isOwner ? `<button class="delete-x" data-del="${t.id}">✕</button>` : ""}
+      ${isOwner ? `<button class="delete-x" data-del="${t.id}">✕</button><button class="edit-x" data-edit="${t.id}">✎</button>` : ""}
       <img src="${t.cover}" alt="${t.title}" loading="lazy">
       <div class="spot-content">
         <span class="badge">${t.tag || "New"}</span>
@@ -521,12 +537,15 @@ function renderSpotlight(){
   `).join("");
   wrap.querySelectorAll(".spot-card").forEach(el => {
     el.addEventListener("click", (e) => {
-      if(e.target.closest(".delete-x")) return;
+      if(e.target.closest(".delete-x") || e.target.closest(".edit-x")) return;
       openPlayer(el.dataset.id);
     });
   });
   wrap.querySelectorAll(".delete-x").forEach(btn => {
     btn.addEventListener("click", (e) => { e.stopPropagation(); deleteTrack(btn.dataset.del); });
+  });
+  wrap.querySelectorAll(".edit-x").forEach(btn => {
+    btn.addEventListener("click", (e) => { e.stopPropagation(); openEditForm(btn.dataset.edit); });
   });
 }
 
@@ -543,7 +562,7 @@ function renderLatest(){
   } else {
     grid.innerHTML = pageItems.map(t => `
       <div class="post-card" data-id="${t.id}" style="position:relative;">
-        ${isOwner ? `<button class="delete-x" data-del="${t.id}">✕</button>` : ""}
+        ${isOwner ? `<button class="delete-x" data-del="${t.id}">✕</button><button class="edit-x" data-edit="${t.id}">✎</button>` : ""}
         <div class="post-thumb">
           <img src="${t.cover}" alt="${t.title}" loading="lazy">
           <span class="type-tag">${t.type}</span>
@@ -558,12 +577,15 @@ function renderLatest(){
     `).join("");
     grid.querySelectorAll(".post-card").forEach(el => {
       el.addEventListener("click", (e) => {
-        if(e.target.closest(".delete-x")) return;
+        if(e.target.closest(".delete-x") || e.target.closest(".edit-x")) return;
         openPlayer(el.dataset.id);
       });
     });
     grid.querySelectorAll(".delete-x").forEach(btn => {
       btn.addEventListener("click", (e) => { e.stopPropagation(); deleteTrack(btn.dataset.del); });
+    });
+    grid.querySelectorAll(".edit-x").forEach(btn => {
+      btn.addEventListener("click", (e) => { e.stopPropagation(); openEditForm(btn.dataset.edit); });
     });
   }
 
@@ -616,6 +638,39 @@ async function deleteTrack(id){
   }catch(err){
     alert("Couldn't delete: " + err.message);
   }
+}
+
+function openEditForm(id){
+  const t = TRACKS.find(tr => tr.id === id);
+  if(!t) return;
+  editingId = id;
+  document.getElementById("uploadTitle").textContent = "Edit Track";
+  document.getElementById("submitUpload").textContent = "Save Changes";
+  document.getElementById("fTitle").value = t.title || "";
+  document.getElementById("fArtist").value = t.artist || "";
+  document.getElementById("fType").value = t.type || "song";
+  document.getElementById("fDesc").value = t.desc || "";
+  document.getElementById("fTag").value = t.tag || "New";
+  document.getElementById("fMediaFile").value = "";
+  document.getElementById("fCoverFile").value = "";
+  document.getElementById("mediaHint").textContent = "Leave blank to keep the current file: " + (t.title || "");
+  document.getElementById("coverHint").textContent = "Leave blank to keep the current cover.";
+  document.getElementById("uploadOverlay").classList.add("open");
+}
+
+function resetUploadForm(){
+  editingId = null;
+  document.getElementById("uploadTitle").textContent = "Add A Track";
+  document.getElementById("submitUpload").textContent = "Publish Track";
+  document.getElementById("fTitle").value = "";
+  document.getElementById("fArtist").value = "";
+  document.getElementById("fType").value = "song";
+  document.getElementById("fMediaFile").value = "";
+  document.getElementById("fCoverFile").value = "";
+  document.getElementById("fDesc").value = "";
+  document.getElementById("fTag").value = "New";
+  document.getElementById("mediaHint").textContent = "";
+  document.getElementById("coverHint").textContent = "";
 }
 
 document.getElementById("closePlayer").addEventListener("click", closePlayer);
@@ -711,41 +766,132 @@ onAuthStateChanged(auth, (user) => {
 
 /* ===== Upload ===== */
 const uploadOverlay = document.getElementById("uploadOverlay");
-document.getElementById("openUploadBtn").addEventListener("click", () => uploadOverlay.classList.add("open"));
-document.getElementById("closeUpload").addEventListener("click", () => uploadOverlay.classList.remove("open"));
-document.getElementById("cancelUpload").addEventListener("click", () => uploadOverlay.classList.remove("open"));
+document.getElementById("openUploadBtn").addEventListener("click", () => { resetUploadForm(); uploadOverlay.classList.add("open"); });
+document.getElementById("closeUpload").addEventListener("click", () => { uploadOverlay.classList.remove("open"); resetUploadForm(); });
+document.getElementById("cancelUpload").addEventListener("click", () => { uploadOverlay.classList.remove("open"); resetUploadForm(); });
+
+/* ===== Cloudinary config ===== */
+const CLOUD_NAME = "dckdyj2jp";
+const UPLOAD_PRESET = "dxnzsm85";
+
+function uploadToCloudinary(file, resourceType, onProgress){
+  return new Promise((resolve, reject) => {
+    const url = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${resourceType}/upload`;
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("upload_preset", UPLOAD_PRESET);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    xhr.upload.onprogress = (e) => {
+      if(e.lengthComputable && onProgress){
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      if(xhr.status >= 200 && xhr.status < 300){
+        const data = JSON.parse(xhr.responseText);
+        resolve(data);
+      } else {
+        reject(new Error("Upload failed (" + xhr.status + "): " + xhr.responseText));
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload."));
+    xhr.send(formData);
+  });
+}
 
 document.getElementById("submitUpload").addEventListener("click", async () => {
   const title = document.getElementById("fTitle").value.trim();
   const artist = document.getElementById("fArtist").value.trim();
   const type = document.getElementById("fType").value;
-  const src = document.getElementById("fSrc").value.trim();
-  const cover = document.getElementById("fCover").value.trim();
+  const mediaFile = document.getElementById("fMediaFile").files[0];
+  const coverFile = document.getElementById("fCoverFile").files[0];
   const desc = document.getElementById("fDesc").value.trim();
   const tag = document.getElementById("fTag").value.trim() || "New";
   const msg = document.getElementById("uploadMsg");
+  const submitBtn = document.getElementById("submitUpload");
+  const progressWrap = document.getElementById("uploadProgressWrap");
+  const progressBar = document.getElementById("uploadProgressBar");
+  const progressLabel = document.getElementById("uploadProgressLabel");
   msg.textContent = ""; msg.className = "form-msg";
 
-  if(!title || !artist || !src || !cover){
-    msg.textContent = "Title, artist, media URL, and cover URL are required.";
+  const isEditing = !!editingId;
+  const existing = isEditing ? TRACKS.find(t => t.id === editingId) : null;
+
+  if(!title || !artist){
+    msg.textContent = "Title and artist are required.";
+    msg.className = "form-msg error";
+    return;
+  }
+  if(!isEditing && !mediaFile){
+    msg.textContent = "A media file is required for a new track.";
+    msg.className = "form-msg error";
+    return;
+  }
+  if(type === "song" && !coverFile && !(isEditing && existing && existing.cover)){
+    msg.textContent = "Songs need a cover image (videos can skip it).";
     msg.className = "form-msg error";
     return;
   }
 
+  submitBtn.disabled = true;
+  progressWrap.style.display = "block";
+
   try{
-    await addDoc(collection(db, "tracks"), {
-      title, artist, type, src, cover, desc, tag,
-      dateLabel: "Just added",
-      createdAt: serverTimestamp()
-    });
-    msg.textContent = "Published!";
+    let src = isEditing ? existing.src : "";
+    let coverUrl = isEditing ? existing.cover : "";
+
+    if(mediaFile){
+      progressLabel.textContent = "Uploading media file...";
+      progressBar.style.width = "0%";
+      const mediaResult = await uploadToCloudinary(mediaFile, "video", (pct) => {
+        progressBar.style.width = pct + "%";
+      });
+      src = mediaResult.secure_url;
+      if(!coverFile && type === "video"){
+        coverUrl = src.replace("/video/upload/", "/video/upload/so_1/").replace(/\.[^/.]+$/, ".jpg");
+      }
+    }
+
+    if(coverFile){
+      progressLabel.textContent = "Uploading cover image...";
+      progressBar.style.width = "0%";
+      const coverResult = await uploadToCloudinary(coverFile, "image", (pct) => {
+        progressBar.style.width = pct + "%";
+      });
+      coverUrl = coverResult.secure_url;
+    }
+
+    progressLabel.textContent = isEditing ? "Saving changes..." : "Saving track...";
+
+    if(isEditing){
+      await updateDoc(doc(db, "tracks", editingId), {
+        title, artist, type, src, cover: coverUrl, desc, tag
+      });
+      msg.textContent = "Changes saved!";
+    } else {
+      await addDoc(collection(db, "tracks"), {
+        title, artist, type, src, cover: coverUrl, desc, tag,
+        dateLabel: "Just added",
+        createdAt: serverTimestamp()
+      });
+      msg.textContent = "Published!";
+    }
+
     msg.className = "form-msg success";
-    ["fTitle","fArtist","fSrc","fCover","fDesc"].forEach(id => document.getElementById(id).value = "");
-    document.getElementById("fTag").value = "New";
-    setTimeout(() => { uploadOverlay.classList.remove("open"); msg.textContent = ""; }, 900);
+    progressWrap.style.display = "none";
+    setTimeout(() => {
+      uploadOverlay.classList.remove("open");
+      resetUploadForm();
+      msg.textContent = "";
+    }, 900);
   }catch(err){
-    msg.textContent = "Couldn't publish: " + err.message;
+    msg.textContent = "Couldn't save: " + err.message;
     msg.className = "form-msg error";
+    progressWrap.style.display = "none";
+  } finally {
+    submitBtn.disabled = false;
   }
 });
 </script>
